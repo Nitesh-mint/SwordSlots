@@ -1,0 +1,10 @@
+# Godot cache / imports (regenerated on open)
+.godot/
+# Android builds
+build/*
+!build/.gdignore
+*.apk
+*.aab
+# Signing keys
+*.keystore
+*.jks
