@@ -16,12 +16,19 @@ const SOUNDS := {
 	tick = [I + "tick_001.ogg", I + "tick_002.ogg", I + "tick_004.ogg"],   # symbol passing
 	reel_stop = [C + "chip-lay-1.ogg", C + "chip-lay-2.ogg", C + "chip-lay-3.ogg"],
 	tease = [I + "question_002.ogg"],                          # first two reels match
-	curse = [I + "error_006.ogg"],                             # a curse landed
 	pair = [J + "Pizzicato jingles/jingles_PIZZI00.ogg"],
 	jackpot = [J + "Pizzicato jingles/jingles_PIZZI07.ogg"],
 	buy = [C + "chips-handle-1.ogg", C + "chips-handle-2.ogg", C + "chips-handle-3.ogg"],
 	coin = [C + "chips-collide-1.ogg", C + "chips-collide-2.ogg", C + "chips-collide-3.ogg", C + "chips-collide-4.ogg"],
 	chest = [C + "chips-stack-1.ogg", C + "chips-stack-2.ogg", C + "chips-stack-3.ogg"],
+	# synthesized bells (tools/make_sfx.gd)
+	bell = ["synth/bell.wav"],          # payout step, pitched up a pentatonic step each time
+	tink = ["synth/tink.wav"],          # coin lands in the purse
+	click = ["synth/click.wav"],
+	win1 = ["synth/win1.wav"],
+	bigwin = ["synth/bigwin.wav"],
+	jackpot_bells = ["synth/jackpot.wav"],
+	lever = [R + "creak1.ogg", R + "creak2.ogg"],
 	# squad
 	merge = [I + "maximize_006.ogg"],
 	summon = [I + "maximize_003.ogg", I + "maximize_004.ogg"],   # hero appears in the camp
@@ -50,7 +57,8 @@ const SOUNDS := {
 	win = [J + "Steel jingles/jingles_STEEL01.ogg"],
 	lose = [J + "Sax jingles/jingles_SAX07.ogg"],
 }
-const VOLUME := {tick = -14.0, reel_stop = -2.0, coin = -10.0, hit = -12.0, enemy_die = -10.0, bow = -8.0, swing = -9.0, clang = -11.0, throw = -8.0, spin = -4.0}
+const VOLUME := {bell = -4.0, tink = -9.0, click = -6.0, lever = -4.0, tick = -14.0, reel_stop = -2.0, coin = -10.0, hit = -12.0, enemy_die = -10.0, bow = -8.0, swing = -9.0, clang = -11.0, throw = -8.0, spin = -4.0}
+const EXACT_PITCH := ["bell", "win1", "bigwin", "jackpot_bells"]  # tuned notes: no random wobble
 const MIN_GAP := 0.07   # seconds before the same sound may retrigger (stops arrow/coin spam)
 const VOICES := 16
 
@@ -144,5 +152,5 @@ func play(name: String, pitch := 1.0) -> void:
 			break
 	player.stream = _cache[path]
 	player.volume_db = VOLUME.get(name, 0.0)
-	player.pitch_scale = pitch * randf_range(0.93, 1.07)
+	player.pitch_scale = pitch * (1.0 if name in EXACT_PITCH else randf_range(0.93, 1.07))
 	player.play()

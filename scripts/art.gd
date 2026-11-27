@@ -12,14 +12,22 @@ const UNITS := {
 	knight = "Units/Black Units/Warrior/Warrior_Run.png",
 	assassin = "Units/Purple Units/Archer/Archer_Run.png",
 	champion = "Units/Yellow Units/Lancer/Lancer_Run.png",
+	shieldmaiden = "Units/Yellow Units/Warrior/Warrior_Run.png",
+	frostmage = "Units/Black Units/Monk/Run.png",
+	hunter = "Units/Black Units/Archer/Archer_Run.png",
+	bard = "Units/Yellow Units/Monk/Run.png",
+	skylancer = "Units/Black Units/Lancer/Lancer_Run.png",
 }
 const ENEMIES := {
 	grunt = "Units/Red Units/Pawn/Pawn_Run Hammer.png",
-	runner = "Units/Red Units/Pawn/Pawn_Run.png",
+	runner = "Units/Red Units/Pawn/Pawn_Run Knife.png",
 	shooter = "Units/Red Units/Archer/Archer_Run.png",
 	brute = "Units/Red Units/Warrior/Warrior_Run.png",
-	mortar = "Units/Red Units/Monk/Run.png",
-	boss = "Units/Red Units/Lancer/Lancer_Run.png",
+	shaman = "Units/Red Units/Monk/Run.png",
+	mortar = "Units/Red Units/Pawn/Pawn_Run Pickaxe.png",
+	warlord = "Units/Red Units/Lancer/Lancer_Run.png",
+	witch = "Units/Red Units/Monk/Run.png",
+	bloodknight = "Units/Red Units/Warrior/Warrior_Run.png",
 }
 # Standing around in the camp (prepare phase).
 const UNIT_IDLE := {
@@ -32,12 +40,17 @@ const UNIT_IDLE := {
 	knight = "Units/Black Units/Warrior/Warrior_Idle.png",
 	assassin = "Units/Purple Units/Archer/Archer_Idle.png",
 	champion = "Units/Yellow Units/Lancer/Lancer_Idle.png",
+	shieldmaiden = "Units/Yellow Units/Warrior/Warrior_Idle.png",
+	frostmage = "Units/Black Units/Monk/Idle.png",
+	hunter = "Units/Black Units/Archer/Archer_Idle.png",
+	bard = "Units/Yellow Units/Monk/Idle.png",
+	skylancer = "Units/Black Units/Lancer/Lancer_Idle.png",
 }
 # Camp (prepare phase) buildings: [path, center, scale]
 const CAMP_BUILDINGS := [
 	["Buildings/Blue Buildings/Castle.png", Vector2(360, 190), 0.7],
-	["Buildings/Blue Buildings/Barracks.png", Vector2(80, 470), 0.5],
-	["Buildings/Blue Buildings/Archery.png", Vector2(640, 470), 0.5],
+	["Buildings/Blue Buildings/Barracks.png", Vector2(75, 355), 0.5],
+	["Buildings/Blue Buildings/Archery.png", Vector2(645, 355), 0.5],
 	["Buildings/Blue Buildings/Monastery.png", Vector2(90, 640), 0.4],
 	["Buildings/Blue Buildings/House1.png", Vector2(640, 650), 0.5],
 ]
@@ -52,11 +65,22 @@ const UNIT_ATTACK := {
 	knight = "Units/Black Units/Warrior/Warrior_Attack1.png",
 	assassin = "Units/Purple Units/Archer/Archer_Shoot.png",
 	champion = "Units/Yellow Units/Lancer/Lancer_Up_Attack.png",
+	shieldmaiden = "Units/Yellow Units/Warrior/Warrior_Attack1.png",
+	frostmage = "Units/Black Units/Monk/Heal.png",
+	hunter = "Units/Black Units/Archer/Archer_Shoot.png",
+	bard = "Units/Yellow Units/Monk/Heal.png",
+	skylancer = "Units/Black Units/Lancer/Lancer_Up_Attack.png",
 }
 const ENEMY_ATTACK := {
+	grunt = "Units/Red Units/Pawn/Pawn_Interact Hammer.png",
+	runner = "Units/Red Units/Pawn/Pawn_Interact Knife.png",
 	shooter = "Units/Red Units/Archer/Archer_Shoot.png",
-	mortar = "Units/Red Units/Monk/Heal.png",
-	boss = "Units/Red Units/Lancer/Lancer_Down_Attack.png",
+	brute = "Units/Red Units/Warrior/Warrior_Attack1.png",
+	shaman = "Units/Red Units/Monk/Heal.png",
+	mortar = "Units/Red Units/Pawn/Pawn_Interact Pickaxe.png",
+	warlord = "Units/Red Units/Lancer/Lancer_Down_Attack.png",
+	witch = "Units/Red Units/Monk/Heal.png",
+	bloodknight = "Units/Red Units/Warrior/Warrior_Attack2.png",
 }
 const GRASS :="Terrain/Tileset/Tilemap_color1.png"   # 64px tiles; middle row y=64: left edge, fill, right edge
 const WATER := "Terrain/Tileset/Water Background color.png"
@@ -85,12 +109,6 @@ const EXPLOSION := "Particle FX/Explosion_01.png"
 const GOLD := "Terrain/Resources/Gold/Gold Resource/Gold_Resource.png"
 const CHEST := "Terrain/Resources/Gold/Gold Stones/Gold Stone 4.png"
 
-# Curse symbols: sprite sheet + source crop shown on the reels.
-const CURSES := {
-	trap = {path = "Particle FX/Explosion_01.png", src = Rect2(616, 40, 112, 112)},
-	thief = {path = "Units/Red Units/Pawn/Pawn_Idle Gold.png", src = Rect2(48, 52, 96, 96)},
-	ambush = {path = "Units/Red Units/Pawn/Pawn_Idle Axe.png", src = Rect2(48, 52, 96, 96)},
-}
 const LAMB := "Terrain/Resources/Meat/Sheep/Sheep_Idle.png"
 
 # UI: packed 9-slice textures from tools/pack_ui.gd, margins [left, top, right, bottom] in source px.
