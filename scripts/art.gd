@@ -134,6 +134,14 @@ const POWER_ICONS := {
 	skull = "UI Elements/UI Elements/Icons/Icon_09.png",
 }
 
+# Reel art for hero categories (see Symbols.DATA type "category").
+const CATEGORY_ICONS := {
+	warrior = "Buildings/Blue Buildings/Barracks.png",
+	ranger = "Buildings/Blue Buildings/Archery.png",
+	mystic = "Buildings/Purple Buildings/Tower.png",
+	support = "Buildings/Yellow Buildings/Monastery.png",
+}
+
 # Sheets whose frames are not square (default frame width = image height).
 const FRAME_W := {
 	"Terrain/Resources/Wood/Trees/Tree1.png": 192,

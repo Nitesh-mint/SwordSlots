@@ -28,6 +28,18 @@ const ITEMS := {
 		desc = "+1 HOLD every prepare phase"},
 	pickaxe = {name = "Pickaxe", icon = "Terrain/Resources/Tools/Tool_04.png", cost = 400,
 		desc = "Sevens pay double gold"},
+	tooth = {name = "Gold Tooth", icon = "UI Elements/UI Elements/Icons/Icon_03.png", cost = 400,
+		desc = "First winning spin each wave: +1 free spin"},
+	contract = {name = "Mercenary Contract", icon = "UI Elements/UI Elements/Icons/Icon_06.png", cost = 400,
+		desc = "First spin each wave with no line: free reroll"},
+	anvil = {name = "Resident Anvil", icon = "Terrain/Resources/Tools/Tool_03.png", cost = 600,
+		desc = "First hero line each wave: +1 unit, and +1 of that symbol on your reels"},
+	seed = {name = "Joker Seed", icon = "UI Elements/UI Elements/Icons/Icon_07.png", cost = 500,
+		desc = "+2 Jesters on your reels (wild: any hero category)"},
+	note = {name = "Black Note", icon = "UI Elements/UI Elements/Icons/Icon_09.png", cost = 500,
+		desc = "First spin each wave lands a Jester in the center"},
+	drum = {name = "Vanguard Drum", icon = "UI Elements/UI Elements/Icons/Icon_05.png", cost = 400,
+		desc = "Front row +30% damage for the first 6s of each battle"},
 }
 
 const CORES := {

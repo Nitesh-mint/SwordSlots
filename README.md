@@ -2,8 +2,19 @@
 
 Mobile-portrait lane battler + 3x3 slot-machine roguelite, made with Godot 4.7.2 (GDScript).
 
-- **Prepare** (camp): pull the lever (gold per spin) to spin the 3x3 grid. Three of the same hero
-  in any line (rows, columns, diagonals) summons it; powers buff the squad. Nudge / Hold / Peek
+- **Prepare** (camp): pull the lever (gold per spin) to spin the 3x3 grid. The reels hold hero
+  categories (Warriors, Rangers, Mages, Support), not heroes: three of a category in any line
+  (rows, columns, diagonals) summons a random unlocked hero of that category, rarer heroes less
+  often. Powers buff the squad. FATE shows three trials (grades C/B/A, e.g. "win 3 waves in a
+  row, max 2 spins"); finishing one earns a FATE SPIN (free, extra, always a hero line, much rarer heroes; A grade
+  also +1 level). Max 6 spins per prepare phase. Every hero has a signature skill (cast on a
+  cooldown). Drag any hero onto another to ABSORB it (XP: rarer heroes need more; Lv5 = awakened,
+  skill x1.5) and take its imprint (Frenzy, Build Up, Last Stand, Guard, Regen, Focus; 2 slots,
+  3 once promoted), or SWAP places. Tap a hero for its skill and imprints.
+  Hero levels go to 33 (Lv6 pick a class, Lv14 Class II, Lv24 Class III, Lv33 awakened).
+- **Stages**: Greenvale, then Crimson Hell and Doom Spire unlock by winning the one before
+  (tougher enemies, more crystals). Rare / epic / legendary heroes unlock by best wave reached. Jesters are wild for hero categories. Faction
+  synergies: 2 / 4 heroes of one category in the squad give that category's bonus. Nudge / Hold / Peek
   help finish lines. Pick a symbol after each spin, drag heroes onto twins to level up (Lv3+
   promotes to a class), place heroes in the FRONT or BACK row, buy Items, pick Cores.
 - **Fight**: auto-battle. Your squad and an enemy squad about its size march into formation and fight

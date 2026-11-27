@@ -9,6 +9,7 @@ const Symbols := preload("res://scripts/symbols.gd")
 const Art := preload("res://scripts/art.gd")
 const Items := preload("res://scripts/items.gd")
 const Meta := preload("res://scripts/meta.gd")
+const Fate := preload("res://scripts/fate.gd")
 
 # Tuning
 const LEVELS := 15
@@ -16,19 +17,20 @@ const BOSS_EVERY := 5         # waves per act; the last one is a boss
 const START_GOLD := 1000
 const SPIN_COST := 200         # first spin of each prepare phase...
 const SPIN_COST_STEP := 50     # ...each further spin in the same phase costs this much more
+const SPIN_CAP := 6            # max spins per prepare phase (FATE SPINs are extra)
 const KILL_GOLD := 35          # per enemy killed (x1.5 on judgement waves)
 const BOSS_GOLD := 400
 const WAVE_GOLD := 350         # clearing a wave (+ WAVE_GOLD_STEP per wave number)
 const WAVE_GOLD_STEP := 40
 const SQUAD_CAP := 8
-const MAX_TIER := 5
+const MAX_TIER := Symbols.MAX_LEVEL   # max hero level = awakened
 const WAVE_HEAL := 0.3
 const JUDGE_HP := 1.5           # judgement wave: enemy HP x
 const JUDGE_DMG := 1.25
 const JUDGE_GOLD := 150         # bonus gold for clearing a judgement wave
 const ITEM_COST_PER_ACT := 200 # shop prices rise each act
-const HP_GROWTH := 1.56        # enemy HP x per wave
-const DMG_GROWTH := 1.42       # enemy damage x per wave
+const HP_GROWTH := 1.74        # enemy HP x per wave
+const DMG_GROWTH := 1.5       # enemy damage x per wave
 const ENEMY_HP := 60.0
 const ENEMY_DMG := 12.0
 const ENEMY_SPEED := 95.0
@@ -106,6 +108,7 @@ var ITEMS_POS := Vector2(444, 1042)   # owned items + cores icons
 const DRAFT_RIBBON := Rect2(130, 150, 460, 72)
 # Camp corner buttons (bottom of the lane): SHOP left, FIGHT right with JUDGEMENT above it.
 var SHOP_BTN_RECT := Rect2(12, 800, 150, 68)
+var FATE_BTN_RECT := Rect2(12, 726, 150, 64)
 var NEXT_RECT := Rect2(548, 800, 160, 68)
 var JUDGE_RECT := Rect2(548, 726, 160, 64)
 # Shop panel (opened from the SHOP button)
@@ -118,6 +121,7 @@ const RESTART_RECT := Rect2(210, 660, 300, 96)
 const PLAY_RECT := Rect2(200, 560, 320, 110)
 const UPG_RECT := Rect2(200, 690, 320, 84)
 const HARD_RECT := Rect2(200, 794, 320, 70)
+const STAGE_RECT := Rect2(160, 466, 400, 70)
 const META_PANEL := Rect2(26, 150, 668, 880)
 const META_RIBBON := Rect2(170, 122, 380, 72)
 const META_CLOSE := Rect2(250, 940, 220, 70)
@@ -164,6 +168,7 @@ var meta_open := false
 var play_btn: Button
 var upg_btn: Button
 var hard_btn: Button
+var stage_btn: Button
 var meta_close: Button
 var meta_btns: Array = []
 var earned := 0
@@ -200,6 +205,13 @@ var popups: Array = []        # {pos, text, color, t} floating payout numbers
 var links: Array = []         # {a, b, t} combo link drawn between two reels
 var lands := {}               # symbol id -> times landed (drives growth / lamb hatching)
 var ranks := {}               # symbol id -> rank (Symbols.GROW_EVERY landings per rank)
+var unlocked := []            # heroes categories can summon (empty = all); tasks will unlock them
+var fate_spins: Array = []    # grades of earned FATE SPINs (used by the next spins)
+var spin_grade := ""          # grade of the FATE SPIN in progress ("" = normal spin)
+var wave_flags := {}          # once-per-prepare item triggers already used (tooth, anvil, contract)
+var trials: Array = []        # Fate trials on offer, one per grade (Fate.new_trial)
+var camp_spins := 0           # spins this prepare phase (for Fate trial rules)
+var wave_rec := {}            # this wave for Fate trials: {spins, deaths, gold, squad, cats}
 var nudges := 0                # NUDGE: after a spin lands, push one reel down a cell
 var holds := 0                 # HOLD: freeze a reel so the next spin keeps it
 var held: Array = [false, false, false]
@@ -216,7 +228,9 @@ var purse_bump := 0.0
 var win_banner := {}           # {text, sub, tier, t, t0}
 var win_flash := 0.0           # marquee bulbs all flash
 var cell_flash: Array = []     # {c, t, color} winning cell pops
-var promote_unit = null        # hero whose class choice panel is open
+var promote_unit = null        # hero whose panel is open (see panel_mode)
+var panel_mode := ""           # promote (pick a class) | info (skill, imprints) | absorb (absorb_from into promote_unit, or swap)
+var absorb_from = null
 var promo_btns: Array = []
 var promo_close: Button
 var shake := 0.0              # screen shake strength, decays to 0
@@ -268,6 +282,8 @@ var shop_btns: Array = []
 var shop_btn: Button          # opens the shop panel
 var shop_close: Button
 var shop_open := false
+var shop_tab := "shop"        # shop | fate: which page the panel shows
+var fate_btn: Button
 var over_label: Label
 var restart_btn: Button
 
@@ -335,12 +351,13 @@ func _ready() -> void:
 	judge_btn.text = "JUDGEMENT\nhard, more gold"
 	shop_btn = _button(SHOP_BTN_RECT.position + Vector2(34, 0), SHOP_BTN_RECT.size - Vector2(34, 0), 24, _toggle_shop)
 	shop_btn.text = "SHOP"
+	fate_btn = _button(FATE_BTN_RECT.position + Vector2(34, 0), FATE_BTN_RECT.size - Vector2(34, 0), 22, _toggle_shop.bind("fate"))
+	fate_btn.text = "FATE"
 	shop_close = _button(SHOP_CLOSE_RECT.position, SHOP_CLOSE_RECT.size, 28, _toggle_shop)
 	shop_close.text = "Close"
 	for k in 2:
 		promo_btns.append(_button(_promo_rect(k).position, _promo_rect(k).size, 16, _on_promote.bind(k)))
 	promo_close = _button(SHOP_CLOSE_RECT.position, SHOP_CLOSE_RECT.size, 28, func(): promote_unit = null)
-	promo_close.text = "Later"
 	draft_info = _label(Vector2(0, 224), Vector2(W, 36), 20)
 
 	over_label = _label(OVER_RECT.position + Vector2(40, 30), OVER_RECT.size - Vector2(80, 70), 40)
@@ -354,6 +371,7 @@ func _ready() -> void:
 	upg_btn = _button(UPG_RECT.position, UPG_RECT.size, 30, _set_meta_open.bind(true))
 	upg_btn.text = "UPGRADES"
 	hard_btn = _button(HARD_RECT.position, HARD_RECT.size, 22, _toggle_hard)
+	stage_btn = _button(STAGE_RECT.position, STAGE_RECT.size, 22, _next_stage)
 	for k in Meta.UPGRADES.size():
 		var id: String = Meta.UPGRADES[k].id
 		meta_btns.append(_button(_meta_row(k).position + Vector2(_meta_row(k).size.x - 150, 12), Vector2(140, 54), 22, _buy_upgrade.bind(id)))
@@ -378,10 +396,12 @@ func _start_run() -> void:
 	gold = START_GOLD + 150 * meta.lvl("gold")
 	gold_shown = 0.0
 	_open_camp(true)
-	var tier := 2 if meta.lvl("veteran") > 0 else 1
+	unlocked = Symbols.all_heroes().filter(func(h): return meta.rarity_unlocked(Symbols.DATA[h].rarity))
+	var tier: int = Symbols.SUMMON_LEVEL[2 if meta.lvl("veteran") > 0 else 1]
 	_summon("swordsman", tier)
 	_summon("swordsman", tier)
 	_summon("archer", tier)
+	trials = Fate.GRADES.map(func(g): return Fate.new_trial(g))
 
 
 func _buy_upgrade(id: String) -> void:
@@ -395,6 +415,13 @@ func _buy_upgrade(id: String) -> void:
 func _set_meta_open(on: bool) -> void:
 	meta_open = on
 	sfx.play("draft" if on else "pick")
+
+
+# Title: cycle through the stages beaten so far (+ the next one).
+func _next_stage() -> void:
+	meta.stage = (meta.stage + 1) % (mini(meta.cleared, Meta.STAGES.size() - 1) + 1)
+	meta.save()
+	sfx.play("pick")
 
 
 func _toggle_hard() -> void:
@@ -424,6 +451,7 @@ func _fit_screen() -> void:
 	TRICK_POS.y += dy
 	LEVER_RECT.position.y += dy
 	SHOP_BTN_RECT.position.y += dy
+	FATE_BTN_RECT.position.y += dy
 	NEXT_RECT.position.y += dy
 	JUDGE_RECT.position.y += dy
 
@@ -564,11 +592,18 @@ func _on_spin() -> void:
 		_pay_next()
 	if not _can_spin():
 		return
-	if spins > 0:
-		spins -= 1
+	spin_grade = ""
+	if not fate_spins.is_empty():  # FATE SPIN: free, extra, always a hero line
+		spin_grade = fate_spins.pop_front()
+		popups.append({pos = REEL_WINDOW.get_center() + Vector2(0, -60), text = "FATE SPIN!", color = Fate.COLOR[spin_grade], t = 1.4})
+		sfx.play("levelup")
 	else:
-		gold -= spin_cost
-		spin_cost += int((SPIN_COST_STEP if started else 20) * _discount())  # always rises, so gold symbols can't loop forever
+		camp_spins += 1
+		if spins > 0:
+			spins -= 1
+		else:
+			gold -= spin_cost
+			spin_cost += int((SPIN_COST_STEP if started else 20) * _discount())  # always rises, so gold symbols can't loop forever
 	spin_offers.clear()  # not picking = skip
 	reel_spinning = true
 	reel_glow = 0.0
@@ -578,6 +613,13 @@ func _on_spin() -> void:
 		if held[i]:
 			for r in 3:
 				result[r * 3 + i] = reels[r * 3 + i]
+	if spin_grade != "":
+		var cats := pool.filter(func(id): return Symbols.DATA[id].type == "category")
+		var cat: String = cats.pick_random() if not cats.is_empty() else "warrior"
+		for c in Symbols.LINES.pick_random():
+			result[c] = cat
+	elif items.has("note") and camp_spins == 1:
+		result[Symbols.CENTER] = "jester"
 	var bag: Array = pool
 	# Tease: a payline already matches on its first two columns -> the last column slows down.
 	reel_tease = false
@@ -637,7 +679,8 @@ func _lever_amount() -> float:
 
 # Spinning only happens while preparing, after any Core pick, with a free spin or enough gold.
 func _can_spin() -> bool:
-	return state == "draft" and not _core_pending() and promote_unit == null and (spins > 0 or gold >= spin_cost)
+	return state == "draft" and not _core_pending() and promote_unit == null \
+		and (not fate_spins.is_empty() or (camp_spins < SPIN_CAP and (spins > 0 or gold >= spin_cost)))
 
 
 func _core_pending() -> bool:
@@ -699,8 +742,7 @@ func _preview() -> void:
 	hit_cells.clear()
 	for k in payout_res.lines:
 		for c in Symbols.LINES[k]:
-			if reels[c] != "blank" and Symbols.LINES[k].map(func(x): return reels[x]).count(reels[c]) >= 2:
-				hit_cells.append(c)
+			hit_cells.append(c)
 
 
 func _collect() -> void:
@@ -765,8 +807,18 @@ func _pay_next() -> void:
 	for u in squad:
 		u.hp = minf(_max_hp(u), u.hp + _max_hp(u) * b.heal)
 	if ev.has("summon"):
-		for k in ev.get("count", 1):
-			_summon(ev.summon[0], ev.summon[1])
+		var names := []
+		var n: int = ev.get("count", 1)
+		if items.has("anvil") and not wave_flags.has("anvil"):
+			wave_flags.anvil = true
+			n += 1
+			pool.append(ev.summon[0])
+		var tier: int = Symbols.SUMMON_LEVEL[mini(ev.summon[1] + (1 if spin_grade == "A" else 0), 5)]
+		for k in n:  # the category rolls an actual hero (FATE SPINs roll rarer ones)
+			var hero := Symbols.pick_hero(ev.summon[0], unlocked, Fate.POWER.get(spin_grade, 0))
+			_summon(hero, tier)
+			names.append(Symbols.DATA[hero].name)
+		ev.text = "%s Lv%d!" % [" + ".join(names), tier]
 	if ev.text != "":
 		popups.append({pos = _reel_cell(ev.i).get_center() + Vector2(0, -30), text = ev.text, color = ev.color, t = 1.3})
 		reel_bounce[ev.i % 3] = REEL_BOUNCE
@@ -799,6 +851,15 @@ func _bell() -> void:
 
 func _payout_done() -> void:
 	var res := payout_res
+	if spin_grade == "":
+		if items.has("tooth") and not res.lines.is_empty() and not wave_flags.has("tooth"):
+			wave_flags.tooth = true
+			spins += 1
+			_flash("Gold Tooth: +1 free spin")
+		if items.has("contract") and res.lines.is_empty() and camp_spins == 1 and not wave_flags.has("contract"):
+			wave_flags.contract = true
+			spins += 1
+			_flash("Mercenary Contract: free reroll")
 	var tier := 3 if res.jackpot else (2 if res.lines.size() >= 2 else (1 if res.lines.size() == 1 else 0))
 	if tier > 0:
 		var gain: int = res.buffs.gold
@@ -839,7 +900,7 @@ func _grow() -> void:
 		if hatch > 0:
 			if lands[id] >= hatch:
 				lands[id] = 0
-				var heroes := Symbols.DATA.keys().filter(func(k): return Symbols.DATA[k].type == "unit" and Symbols.DATA[k].rarity != "common")
+				var heroes := ["mystic", "support"]
 				var hero: String = heroes.pick_random()
 				pool[pool.find(id)] = hero
 				popups.append({pos = pos, text = "Grew into\n%s!" % Symbols.DATA[hero].name, color = Color("ffe14d"), t = 1.6})
@@ -875,8 +936,9 @@ func _shop_rect(i: int) -> Rect2:
 	return Rect2(SHOP_PANEL.position.x + 22 + i * 202, SHOP_PANEL.position.y + 70, 194, 150)
 
 
-func _toggle_shop() -> void:
+func _toggle_shop(tab := "shop") -> void:
 	shop_open = not shop_open and state == "draft"
+	shop_tab = tab
 	drag_idx = -1
 	sfx.play("draft" if shop_open else "pick")
 
@@ -895,14 +957,60 @@ func _d(u: Dictionary) -> Dictionary:
 	return u.stats if u.has("stats") else Symbols.DATA[u.type]
 
 
+# Next promotion stage reached: 0 -> pick a class, 1 -> Class II, 2 -> Class III.
 func _can_promote(u: Dictionary) -> bool:
-	return u.tier >= Symbols.CLASS_TIER and not u.has("cls") and Symbols.CLASSES.has(u.type)
+	var p: int = u.get("promo", 0)
+	return p < Symbols.PROMO_LEVELS.size() and u.tier >= Symbols.PROMO_LEVELS[p] and Symbols.CLASSES.has(u.type)
+
+
+# Class II and III: x1.3 HP and damage each.
+func _promo_mult(u: Dictionary) -> float:
+	return pow(1.3, maxi(0, u.get("promo", 0) - 1))
+
+
+# Class II / III need no choice: rank up on the spot with a celebration.
+func _promote_stage(u: Dictionary) -> void:
+	while _can_promote(u) and u.get("promo", 0) >= 1:
+		u.promo += 1
+		u.hp = _max_hp(u)
+		u.lvl_t = LEVEL_TIME
+		var p := _unit_pos(squad.find(u))
+		_burst(p, Color("c05cff"), 26)
+		popups.append({pos = p + Vector2(0, -60), text = "%s %s!" % [_d(u).cls_name.to_upper(), "II" if u.promo == 2 else "III"],
+			color = Color("e0a0ff"), t = 1.8})
+		sfx.play("jackpot")
+		shake = maxf(shake, 0.5)
+
+
+func _class_title(u: Dictionary) -> String:
+	var d := _d(u)
+	return d.get("cls_name", d.name) + ["", "", " II", " III"][u.get("promo", 0)]
 
 
 func _on_promote(k: int) -> void:
-	if promote_unit != null:
-		_promote(promote_unit, k)
+	var u = promote_unit
+	var mode := panel_mode
 	promote_unit = null
+	if u == null:
+		return
+	match mode:
+		"promote":
+			_promote(u, k)
+		"absorb":
+			if k == 0:
+				_merge(squad.find(u), squad.find(absorb_from))
+			else:  # swap places
+				var sl: int = u.slot
+				u.slot = absorb_from.slot
+				absorb_from.slot = sl
+				_sort_squad()
+				sfx.play("pick")
+
+
+func _open_panel(u: Dictionary, mode: String) -> void:
+	promote_unit = u
+	panel_mode = mode
+	sfx.play("draft")
 
 
 func _promote(u: Dictionary, k: int) -> void:
@@ -910,6 +1018,7 @@ func _promote(u: Dictionary, k: int) -> void:
 		return
 	u.stats = Symbols.class_stats(u.type, k)
 	u.cls = u.stats.cls
+	u.promo = 1
 	u.hp = _max_hp(u)
 	u.lvl_t = LEVEL_TIME
 	_sort_squad()
@@ -926,7 +1035,23 @@ func _promo_rect(k: int) -> Rect2:
 
 
 func _max_hp(u: Dictionary) -> float:
-	return _d(u).hp * Symbols.tier_mult(u.tier) * (1.0 + power.vigor / 100.0)
+	var syn := _syn_levels()
+	var m: float = (1.0 + power.vigor / 100.0) * (1.0 + Symbols.SYNERGY.support.amount[syn.get("support", 0)] / 100.0)
+	if Symbols.category_of(u.type) == "warrior":
+		m *= 1.0 + Symbols.SYNERGY.warrior.amount[syn.get("warrior", 0)] / 100.0
+	return _d(u).hp * Symbols.level_power(u.tier) * m * _promo_mult(u)
+
+
+# Faction synergy level (0-2) per hero category, from how many of its heroes are in the squad.
+func _syn_levels() -> Dictionary:
+	var n := {}
+	for u in squad:
+		var c := Symbols.category_of(u.type)
+		n[c] = n.get(c, 0) + 1
+	var out := {}
+	for c in Symbols.SYNERGY:
+		out[c] = Symbols.synergy_level(n.get(c, 0))
+	return out
 
 
 func _dmg(u: Dictionary) -> float:
@@ -937,11 +1062,19 @@ func _dmg(u: Dictionary) -> float:
 		m *= FRONT_RANGED_DMG if _front(u) else BACK_RANGED_DMG
 	if cores.has("archery") and _d(u).attack == "shot":
 		m *= 1.3
-	return _d(u).dmg * Symbols.tier_mult(u.tier) * m
+	var cat := Symbols.category_of(u.type)
+	if cat in ["ranger", "mystic"]:
+		m *= 1.0 + Symbols.SYNERGY[cat].amount[_syn_levels()[cat]] / 100.0
+	if items.has("drum") and state == "wave" and battle_t < 6.0 and _front(u):
+		m *= 1.3
+	if state == "wave":  # Build Up: stacks every 2s of battle
+		m *= 1.0 + Symbols.IMPRINTS.buildup.per / 100.0 * _imp(u, "buildup") * minf(10.0, floorf(maxf(0.0, battle_t - DEPLOY_TIME) / 2.0))
+	return _d(u).dmg * Symbols.level_power(u.tier) * m * _promo_mult(u)
 
 
 func _cooldown(u: Dictionary) -> float:
-	return _d(u).cd / (1.0 + power.haste / 100.0)
+	return _d(u).cd / (1.0 + power.haste / 100.0) / (1.0 + Symbols.IMPRINTS.frenzy.per / 100.0 * _imp(u, "frenzy")) \
+		/ (1.4 if u.get("buff_t", 0.0) > 0 else 1.0)  # Bard aura
 
 
 func _summon(id: String, tier: int) -> void:
@@ -963,7 +1096,7 @@ func _summon(id: String, tier: int) -> void:
 		u.color = col
 		_burst(_unit_pos(i), col, 18 if state == "draft" else 8)
 		sfx.play("summon", 1.0 + 0.1 * tier)
-		if rar in ["epic", "legendary"] or tier >= 3:
+		if rar in ["epic", "legendary"] or tier >= Symbols.SUMMON_LEVEL[3]:
 			shake = maxf(shake, 0.4)
 
 
@@ -1007,7 +1140,10 @@ func _formation_at(pos: Vector2) -> int:
 func _hurt(u: Dictionary, dmg: float) -> void:
 	if _front(u):
 		dmg *= FRONT_MELEE_ARMOR if _d(u).attack == "melee" else FRONT_RANGED_HURT
-	u.hp -= dmg
+	dmg *= 1.0 - Symbols.IMPRINTS.guard.per / 100.0 * _imp(u, "guard")
+	var sh: float = minf(u.get("shield", 0.0), dmg)  # skill shields soak damage first
+	u.shield = u.get("shield", 0.0) - sh
+	u.hp -= dmg - sh
 
 
 func _smooth(x: float) -> float:
@@ -1021,53 +1157,95 @@ func _sort_squad() -> void:
 
 
 func _can_merge(a: Dictionary, b: Dictionary) -> bool:
-	return a.type == b.type and a.tier == b.tier and a.tier < MAX_TIER \
-		and (not a.has("cls") or not b.has("cls") or a.cls == b.cls)
+	return not is_same(a, b)
 
 
-# Keeps squad[keep], removes squad[gone].
+# u absorbs g: g's worth as XP (levels up), g's imprints and its signature imprint +1, and a
+# same-type twin's class. Returns what changed, as lines. No effects: also used for previews.
+func _absorb_into(u: Dictionary, g: Dictionary) -> Array:
+	var out := []
+	if u.type == g.type and not u.has("cls") and g.has("cls"):
+		u.cls = g.cls
+		u.stats = g.stats
+		u.promo = maxi(1, g.get("promo", 1))
+		out.append("Becomes a %s" % g.stats.cls_name)
+	var t0: int = u.tier
+	u.xp = u.get("xp", 0.0) + Symbols.feed_value(g.type, g.tier, g.get("xp", 0.0))
+	while u.tier < MAX_TIER and u.xp >= Symbols.xp_need(u.type, u.tier) - 0.001:
+		u.xp -= Symbols.xp_need(u.type, u.tier)
+		u.tier += 1
+	if u.tier >= MAX_TIER:
+		u.xp = 0.0
+		out.append("Lv%d -> Lv%d  AWAKENED!" % [t0, u.tier] if t0 < MAX_TIER else "Max level")
+	elif u.tier > t0:
+		out.append("Lv%d -> Lv%d" % [t0, u.tier])
+	else:
+		out.append("XP %.1f / %.1f" % [u.xp, Symbols.xp_need(u.type, u.tier)])
+	var gifts: Dictionary = g.get("imp", {}).duplicate()
+	var sig: String = Symbols.HERO_IMPRINT[g.type]
+	gifts[sig] = maxi(gifts.get(sig, 0), _imp(u, sig) + 1)
+	for id in gifts:
+		var imp: Dictionary = u.get("imp", {}).duplicate()
+		if not imp.has(id) and imp.size() >= _imprint_slots(u):
+			out.append("No slot for %s" % Symbols.IMPRINTS[id].name)
+			continue
+		var lv := mini(maxi(imp.get(id, 0), gifts[id]), Symbols.IMPRINT_MAX)
+		if lv > imp.get(id, 0):
+			imp[id] = lv
+			u.imp = imp
+			out.append("+ " + Symbols.imprint_text(id, lv))
+	return out
+
+
+func _imp(u: Dictionary, id: String) -> int:
+	return u.get("imp", {}).get(id, 0)
+
+
+func _imprint_slots(u: Dictionary) -> int:
+	return Symbols.IMPRINT_SLOTS + mini(u.get("promo", 0), 2)
+
+
+# squad[keep] absorbs squad[gone].
 func _merge(keep: int, gone: int) -> bool:
-	if keep == gone or not _can_merge(squad[keep], squad[gone]):
+	if keep < 0 or gone < 0 or keep == gone:
 		return false
 	var u: Dictionary = squad[keep]
 	var g: Dictionary = squad[gone]
-	if not u.has("cls") and g.has("cls"):  # the promoted twin's class carries over
-		u.cls = g.cls
-		u.stats = g.stats
+	var t0: int = u.tier
+	var lines := _absorb_into(u, g)
 	if u.get("slot", -1) < 0:
 		u.slot = g.slot
-	u.tier += 1
 	u.hp = _max_hp(u)
 	squad.remove_at(gone)
 	_sort_squad()
 	u.lvl_t = LEVEL_TIME
 	var p := _unit_pos(squad.find(u))
 	_burst(p, Color(1, 0.85, 0.25), 16)
-	popups.append({pos = p + Vector2(0, -40), text = "LEVEL UP!\nLv%d" % u.tier, color = Color("ffe14d"), t = 1.3})
+	popups.append({pos = p + Vector2(0, -40), text = ("LEVEL UP!\n" if u.tier > t0 else "") + "\n".join(lines.slice(0, 2)),
+		color = Color("ffe14d"), t = 1.6})
 	sfx.play("merge")
-	sfx.play("levelup", 0.9 + 0.1 * u.tier)
-	shake = maxf(shake, 0.25)
+	sfx.play("levelup", 0.9 + 0.01 * u.tier)
+	shake = maxf(shake, 0.25 if u.tier == t0 else 0.4)
 	if state == "draft" and _can_promote(u):
-		promote_unit = u
+		if u.get("promo", 0) == 0:
+			_open_panel(u, "promote")
+		else:
+			_promote_stage(u)
 	return true
 
 
-func _has_twins() -> bool:
-	for i in squad.size():
-		for j in range(i + 1, squad.size()):
-			if _can_merge(squad[i], squad[j]):
-				return true
-	return false
-
-
+# Squad over the cap: the newest hero is absorbed into its best match (same hero, else same category).
 func _auto_merge() -> bool:
-	var best := []
-	for i in squad.size():
-		for j in range(i + 1, squad.size()):
-			if _can_merge(squad[i], squad[j]) and (best.is_empty() or squad[i].tier > squad[best[0]].tier):
-				best = [i, j]
-	return not best.is_empty() and _merge(best[0], best[1])
-
+	var g: Dictionary = squad.back()
+	var best := -1
+	var score := -1
+	for i in squad.size() - 1:
+		var o: Dictionary = squad[i]
+		var sc: int = o.tier + (100 if o.type == g.type else 50 if Symbols.category_of(o.type) == Symbols.category_of(g.type) else 0)
+		if sc > score:
+			best = i
+			score = sc
+	return _merge(best, squad.size() - 1)
 
 # Battle formation on the path; in the camp the squad stands on the summoning circle,
 # and while the fight starts it marches from the circle onto the path.
@@ -1084,6 +1262,11 @@ func _unit_pos(i: int) -> Vector2:
 
 func _start_wave() -> void:
 	state = "wave"
+	wave_rec = {spins = camp_spins, deaths = 0, gold = gold, squad = squad.size(), hp = 0.0,
+		syn = _syn_levels().values().filter(func(l): return l > 0).size(),
+		promoted = squad.filter(func(u): return u.has("stats")).size(),
+		class2 = squad.filter(func(u): return u.get("promo", 0) >= 2).size(),
+		imp3 = squad.filter(func(u): return u.get("imp", {}).values().has(Symbols.IMPRINT_MAX)).size()}
 	battle_t = 0.0
 	victory_t = 0.0
 	projectiles.clear()
@@ -1092,6 +1275,9 @@ func _start_wave() -> void:
 	for u in squad:
 		u.pos = _home(u)
 		u.t = randf_range(0.0, 0.4)
+		u.shield = 0.0
+		if Symbols.SKILLS.has(u.type):  # first cast comes halfway through the cooldown
+			u.sk_t = Symbols.SKILLS[u.type].cd * 0.5 + randf_range(0.0, 0.5)
 		u.erase("leapt")
 		u.erase("dash_to")
 	_make_wave()
@@ -1121,11 +1307,11 @@ func _wave_name() -> String:
 
 
 func _hp_scale() -> float:
-	return pow(HP_GROWTH, level - 1) * (1.0 + power.enemy_hp) * (JUDGE_HP if judgement else 1.0) * (Meta.HARD_HP if meta.hard else 1.0)
+	return pow(HP_GROWTH, level - 1) * (1.0 + power.enemy_hp) * (JUDGE_HP if judgement else 1.0) * (Meta.HARD_HP if meta.hard else 1.0) * _stage().hp
 
 
 func _dmg_scale() -> float:
-	return pow(DMG_GROWTH, level - 1) * (JUDGE_DMG if judgement else 1.0) * (Meta.HARD_DMG if meta.hard else 1.0)
+	return pow(DMG_GROWTH, level - 1) * (JUDGE_DMG if judgement else 1.0) * (Meta.HARD_DMG if meta.hard else 1.0) * _stage().dmg
 
 
 # Scenery: trees on the banks (drawn over units), bushes on the lane edges, rocks in the water.
@@ -1157,7 +1343,11 @@ func _spawn_decor(kind: String, y: float) -> void:
 
 
 func _theme() -> Dictionary:
-	return THEMES[mini(_act_index(), THEMES.size() - 1)]
+	return THEMES[mini(_act_index() + _stage().theme, THEMES.size() - 1)]
+
+
+func _stage() -> Dictionary:
+	return Meta.STAGES[meta.stage]
 
 
 # Ground/scenery colour: act tint, darker each wave of the act, purple on judgement, red on bosses.
@@ -1224,7 +1414,7 @@ func _make_wave() -> void:
 
 func _add_enemy(type: String, home: Vector2, start: Vector2) -> void:
 	var t := _etype(type)
-	var hp_: float = ENEMY_HP * t.hp * _hp_scale()
+	var hp_: float = ENEMY_HP * t.hp * _hp_scale() * (_stage().boss_hp if BOSSES.has(type) else 1.0)
 	enemies.append({id = next_id, kind = "boss" if BOSSES.has(type) else "enemy", type = type, pos = start, home = home,
 		hp = hp_, max_hp = hp_, r = t.r, dmg = ENEMY_DMG * t.dmg * _dmg_scale(), t = randf_range(0.2, 0.8),
 		ab_t = t.get("every", 0.0), act_t = 0.0, flip = false, slow_t = 0.0, spd = 1.0})
@@ -1311,6 +1501,13 @@ func _heroes_act(delta: float, ot: float) -> void:
 			continue
 		if enemies.is_empty():
 			continue
+		var rg := _imp(u, "regen")
+		if rg > 0:
+			u.hp = minf(_max_hp(u), u.hp + _max_hp(u) * Symbols.IMPRINTS.regen.per / 100.0 * rg * delta)
+		u.sk_t = u.get("sk_t", 3.0) - delta
+		if u.sk_t <= 0 and Symbols.SKILLS.has(u.type):
+			u.sk_t = Symbols.SKILLS[u.type].cd * (1.0 - 0.1 * _imp(u, "focus"))
+			_cast_skill(u, ot)
 		if d.get("ability", "") == "leap" and not u.get("leapt", false):
 			u.leapt = true
 			var far = enemies[0]
@@ -1395,6 +1592,9 @@ func _enemies_act(delta: float, ot: float) -> void:
 	for e in enemies:
 		var t := _etype(e.type)
 		e.slow_t = maxf(0.0, e.slow_t - delta)
+		if e.get("stun_t", 0.0) > 0:  # Last Stand stun
+			e.stun_t -= delta
+			continue
 		var sf := 0.6 if e.slow_t > 0 else 1.0
 		e.t -= delta * sf
 		if t.has("every"):  # boss ability
@@ -1571,6 +1771,18 @@ func _apply_deaths() -> void:
 	var dead := squad.filter(func(u): return u.hp <= 0)
 	if not dead.is_empty():
 		squad = squad.filter(func(u): return u.hp > 0)
+		for u in dead:  # Last Stand: explode on death and stun nearby enemies
+			var ex := _imp(u, "explode")
+			if ex > 0 and state == "wave":
+				for e in enemies:
+					if e.pos.distance_to(u.pos) < 140.0 + e.r:
+						e.hp -= _max_hp(u) * Symbols.IMPRINTS.explode.per / 100.0 * ex
+						e.stun_t = 1.0
+				effects.append({pos = u.pos, r = 140.0, t = 0.5, t0 = 0.5, boom = true, color = Color(1, 0.5, 0.1, 0.35)})
+				popups.append({pos = u.pos + Vector2(0, -40), text = "LAST STAND!", color = Color(1, 0.6, 0.2), t = 1.2})
+				sfx.play("boom")
+				shake = maxf(shake, 0.4)
+		wave_rec.deaths = wave_rec.get("deaths", 0) + dead.size()
 		_flash("%s fell!" % Symbols.DATA[dead[0].type].name)
 		sfx.play("unit_die")
 
@@ -1594,6 +1806,12 @@ func _end_wave() -> void:
 	if level >= LEVELS:
 		_game_over("You beat all 3 acts!")
 		return
+	var hp_now := 0.0
+	var hp_max := 0.0
+	for u in squad:
+		hp_now += maxf(u.hp, 0.0)
+		hp_max += _max_hp(u)
+	wave_rec.hp = hp_now / maxf(hp_max, 1.0)
 	var heal := (0.7 if items.has("meat") else WAVE_HEAL) + 0.15 * meta.lvl("heal")
 	for u in squad:
 		u.hp = minf(_max_hp(u), u.hp + _max_hp(u) * heal)
@@ -1608,6 +1826,15 @@ func _end_wave() -> void:
 	if judgement:
 		gold += JUDGE_GOLD
 		notes.append("Judgement passed! +%d gold" % JUDGE_GOLD)
+	for k in trials.size():
+		var t: Dictionary = trials[k]
+		if Fate.advance(t, wave_rec):
+			fate_spins.append(t.grade)
+			notes.append("FATE STONE! %s done: FATE SPIN ready" % t.name)
+			sfx.play("jackpot")
+			shake = maxf(shake, 0.5)
+		if t.progress >= t.need or t.left <= 0:
+			trials[k] = Fate.new_trial(t.grade, t.id)
 	if not notes.is_empty():
 		_flash("\n".join(notes))
 	_open_camp(_boss_level())
@@ -1621,6 +1848,8 @@ func _open_camp(core: bool) -> void:
 	offers = Items.offers(Items.CORES, cores, 3) if core else []
 	spin_offers.clear()
 	spin_cost = int(SPIN_COST * _discount())
+	camp_spins = 0
+	wave_flags = {}
 	nudges = NUDGES + (1 if items.has("dice") else 0) + meta.lvl("nudge")
 	holds = HOLDS + (1 if items.has("chain") else 0) + meta.lvl("hold")
 	held = [false, false, false]
@@ -1640,6 +1869,8 @@ func _buy_item(i: int) -> void:
 	shop[i] = ""
 	if id == "crook":
 		pool += ["lamb", "lamb"]
+	if id == "seed":
+		pool += ["jester", "jester"]
 	sfx.play("buy")
 
 
@@ -1680,11 +1911,19 @@ func _game_over(msg: String) -> void:
 	var cleared := level if won else level - 1
 	earned = meta.reward(cleared, won)
 	meta.crystals += earned
+	var locked := ["rare", "epic", "legendary"].filter(func(r): return not meta.rarity_unlocked(r))
 	meta.best = maxi(meta.best, level)
+	var news := []
+	for r in locked:
+		if meta.rarity_unlocked(r):
+			news.append("New %s heroes unlocked!" % r)
 	if won:
 		meta.wins += 1
+		if meta.stage + 1 > meta.cleared and meta.stage + 1 < Meta.STAGES.size():
+			news.append("Stage %d unlocked: %s" % [meta.stage + 2, Meta.STAGES[meta.stage + 1].name])
+		meta.cleared = maxi(meta.cleared, meta.stage + 1)
 	meta.save()
-	over_label.text = "%s\n+%d crystals" % [msg, earned]
+	over_label.text = "%s\n+%d crystals%s" % [msg, earned, "\n" + "\n".join(news) if not news.is_empty() else ""]
 	sfx.stop_music()
 	sfx.play("win" if msg.begins_with("You beat") else "lose")
 
@@ -1732,12 +1971,11 @@ func _input(event: InputEvent) -> void:
 				drag_idx = slot
 				drag_pos = event.position
 		else:
-			if drag_idx >= 0 and slot == drag_idx and _can_promote(squad[slot]):  # tap = promote
-				promote_unit = squad[slot]
-				sfx.play("draft")
-			elif drag_idx >= 0 and drag_idx < squad.size() and slot >= 0 and slot < squad.size() and slot != drag_idx \
-					and _can_merge(squad[slot], squad[drag_idx]):
-				_merge(slot, drag_idx)
+			if drag_idx >= 0 and slot == drag_idx:  # tap = promote, else hero info (skill, imprints)
+				_open_panel(squad[slot], "promote" if _can_promote(squad[slot]) else "info")
+			elif drag_idx >= 0 and drag_idx < squad.size() and slot >= 0 and slot < squad.size() and slot != drag_idx:
+				absorb_from = squad[drag_idx]  # dropped on another hero: absorb it, or swap places
+				_open_panel(squad[slot], "absorb")
 			elif drag_idx >= 0 and drag_idx < squad.size():
 				var to := _formation_at(event.position)
 				if to >= 0 and to != squad[drag_idx].slot:  # move to an empty slot, or swap places
@@ -1816,6 +2054,9 @@ func _update_ui() -> void:
 	upg_btn.visible = play_btn.visible
 	hard_btn.visible = play_btn.visible and meta.wins > 0
 	hard_btn.text = "HARD MODE: %s" % ("ON" if meta.hard else "OFF")
+	stage_btn.visible = play_btn.visible
+	var st := _stage()
+	stage_btn.text = "STAGE %d: %s%s" % [meta.stage + 1, st.name, "   >" if meta.cleared > 0 else ""]
 	meta_close.visible = title and meta_open and not settings_open
 	for k in meta_btns.size():
 		var id: String = Meta.UPGRADES[k].id
@@ -1834,7 +2075,8 @@ func _update_ui() -> void:
 	elif _core_pending():
 		spin_btn.text = "Pick a Core"
 	else:
-		spin_btn.text = "FREE x%d" % spins if spins > 0 else "      %d" % spin_cost
+		spin_btn.text = "FATE SPIN" if not fate_spins.is_empty() and not reel_spinning else "NO SPINS LEFT" if camp_spins >= SPIN_CAP \
+			else "FREE x%d" % spins if spins > 0 else "      %d" % spin_cost
 	spin_btn.disabled = not reel_spinning and not awaiting and not _can_spin()
 	spin_btn.visible = not settings_open and state in ["draft", "wave"]
 
@@ -1843,9 +2085,10 @@ func _update_ui() -> void:
 	var in_shop := camp and shop_open
 	camp = camp and not shop_open and not in_promo
 	for k in 2:
-		promo_btns[k].visible = in_promo
+		promo_btns[k].visible = in_promo and panel_mode != "info"
 		promo_btns[k].text = ""
 	promo_close.visible = in_promo
+	promo_close.text = {promote = "Later", absorb = "Cancel", info = "Close"}.get(panel_mode, "Close")
 	draft_title.visible = camp
 	var ids := _card_ids()
 	if _core_pending():
@@ -1856,6 +2099,7 @@ func _update_ui() -> void:
 		draft_title.text = "PREPARE YOUR ARMY"
 	shop_close.visible = in_shop
 	shop_btn.visible = camp
+	fate_btn.visible = camp and not trials.is_empty()
 	next_btn.visible = camp
 	next_btn.text = "FIGHT!"
 	next_btn.disabled = _core_pending()
@@ -1865,15 +2109,21 @@ func _update_ui() -> void:
 	var kinds := {}
 	for id in pool:
 		kinds[id] = true
-	draft_info.text = "Reels: %d symbols, %d kinds   Next: %s%s" % [pool.size(), kinds.size(),
+	var syn := []
+	var lv := _syn_levels()
+	for c in lv:
+		if lv[c] > 0:
+			syn.append("%s %s" % [Symbols.DATA[c].name, "I".repeat(lv[c])])
+	draft_info.text = "Spins %d/%d   Next: %s   %s" % [camp_spins, SPIN_CAP,
 		"BOSS" if next_boss and started else "wave",
-		"  (spin again = skip)" if not ids.is_empty() and not _core_pending() else ""]
+		"(spin again = skip)" if not ids.is_empty() and not _core_pending() else
+		"Synergy: " + ", ".join(syn) if not syn.is_empty() else "Synergy: 2+ of a category"]
 	for i in 3:
 		draft_btns[i].visible = camp and i < ids.size() and not reel_spinning
 		if draft_btns[i].visible:
 			var d: Dictionary = Items.info(ids[i]) if _core_pending() else Symbols.DATA[ids[i]]
 			draft_btns[i].text = d.desc
-		shop_btns[i].visible = in_shop and i < shop.size()
+		shop_btns[i].visible = in_shop and shop_tab == "shop" and i < shop.size()
 		if shop_btns[i].visible:
 			shop_btns[i].text = "SOLD" if shop[i] == "" else Items.ITEMS[shop[i]].desc
 			shop_btns[i].disabled = shop[i] == "" or gold < _item_cost(shop[i])
@@ -1952,6 +2202,11 @@ func _symbol_src(id: String, rect: Rect2) -> Array:
 	if Art.POWER_ICONS.has(id):
 		var t := Art.tex(Art.POWER_ICONS[id])
 		return [t, Rect2(Vector2.ZERO, t.get_size()), rect.grow(-rect.size.x * 0.1), Color.WHITE]
+	if Art.CATEGORY_ICONS.has(id):  # whole building, fitted into the cell
+		var t := Art.tex(Art.CATEGORY_ICONS[id])
+		var r := rect.grow(-rect.size.x * 0.06)
+		var sz := t.get_size() * minf(r.size.x / t.get_size().x, r.size.y / t.get_size().y)
+		return [t, Rect2(Vector2.ZERO, t.get_size()), Rect2(r.get_center() - sz / 2, sz), Color.WHITE]
 	if id == "lamb":
 		return [Art.tex(Art.LAMB), Rect2(24, 34, 80, 80), rect.grow(-4), Color.WHITE]
 	return []
@@ -2019,7 +2274,7 @@ func _draw_icon(rect: Rect2, path: String) -> void:
 
 func _draw_unit(pos: Vector2, u: Dictionary, phase: int) -> void:
 	var camp := state == "draft" or (trans > 0 and state == "wave")
-	var s: float = UNIT_SCALE * (1.0 + 0.1 * (u.tier - 1))
+	var s: float = UNIT_SCALE * (1.0 + 0.4 * (u.tier - 1) / (MAX_TIER - 1.0))
 	if camp:
 		s *= lerpf(1.0, CAMP_SCALE, trans / TRANS_TIME if state == "wave" else 1.0)
 	var mod := Color.WHITE
@@ -2068,6 +2323,12 @@ func _draw_unit(pos: Vector2, u: Dictionary, phase: int) -> void:
 	var frac: float = clampf(u.hp / _max_hp(u), 0, 1)
 	draw_rect(Rect2(pos + Vector2(-20, 30), Vector2(40, 5)), Color(0, 0, 0, 0.6))
 	draw_rect(Rect2(pos + Vector2(-20, 30), Vector2(40 * frac, 5)), Color("4ae08a"))
+	if u.get("shield", 0.0) > 0:  # skill shield on top of the HP bar
+		draw_rect(Rect2(pos + Vector2(-20, 29), Vector2(40 * clampf(u.shield / _max_hp(u), 0, 1), 3)), Color("8fd8ff"))
+	if camp and u.tier < MAX_TIER and u.get("xp", 0.0) > 0:  # absorb progress to the next level
+		draw_rect(Rect2(pos + Vector2(-20, 36), Vector2(40 * clampf(u.xp / Symbols.xp_need(u.type, u.tier), 0, 1), 3)), Color("ffe14d"))
+	if u.tier >= MAX_TIER:  # awakened: golden halo
+		draw_arc(pos + Vector2(0, -40), 12.0, 0, TAU, 20, Color(1, 0.85, 0.3, 0.8), 3.0)
 
 
 func _draw_ground() -> void:
@@ -2173,8 +2434,8 @@ func _draw() -> void:
 		_draw_unit(drag_pos, squad[drag_idx], 0)
 	elif state == "draft" and not squad.is_empty():
 		_text(Vector2(0, CAMP_CENTER.y + 132), "FRONT: melee hit harder, take less    BACK: safe from arrows, ranged +30%", 16, W, Color(1, 1, 1, 0.85))
-		if _has_twins():
-			_text(Vector2(0, CAMP_CENTER.y + 156), "Drag a hero onto its twin to level up", 20, W, Color(1, 0.92, 0.5, 0.6 + 0.4 * sin(anim_time * 3.0)))
+		if squad.size() >= 2:
+			_text(Vector2(0, CAMP_CENTER.y + 156), "Drag a hero onto another to ABSORB it.  Tap for skills", 20, W, Color(1, 0.92, 0.5, 0.6 + 0.4 * sin(anim_time * 3.0)))
 		for i in squad.size():  # warn about heroes in the wrong row
 			var u: Dictionary = squad[i]
 			var melee: bool = _d(u).attack == "melee"
@@ -2314,10 +2575,10 @@ func _vignette(c: Color) -> void:
 
 # 9-slice draw of a packed UI texture; s scales the borders (pack art is drawn at 2x).
 # Purple crystal (meta currency).
-func _gem(c: Vector2, r: float) -> void:
+func _gem(c: Vector2, r: float, col := Color("a050e8")) -> void:
 	var pts := PackedVector2Array([c + Vector2(0, -r), c + Vector2(r * 0.8, -r * 0.2), c + Vector2(0, r), c + Vector2(-r * 0.8, -r * 0.2)])
-	draw_colored_polygon(pts, Color("a050e8"))
-	draw_colored_polygon(PackedVector2Array([c + Vector2(0, -r), c + Vector2(r * 0.8, -r * 0.2), c + Vector2(0, -r * 0.1)]), Color("d8a8ff"))
+	draw_colored_polygon(pts, col)
+	draw_colored_polygon(PackedVector2Array([c + Vector2(0, -r), c + Vector2(r * 0.8, -r * 0.2), c + Vector2(0, -r * 0.1)]), col.lightened(0.5))
 	pts.append(pts[0])
 	draw_polyline(pts, Color("3a1060"), 2.5)
 
@@ -2335,6 +2596,14 @@ func _draw_title() -> void:
 		_button_art(play_btn, "red")
 		_button_art(upg_btn, "blue", 0.45)
 		_button_art(hard_btn, "red" if meta.hard else "blue", 0.35)
+		_button_art(stage_btn, "red" if meta.stage > 0 else "blue", 0.35)
+		var n := Symbols.all_heroes().filter(func(h): return meta.rarity_unlocked(Symbols.DATA[h].rarity)).size()
+		var next := ""
+		for rar in ["rare", "epic", "legendary"]:
+			if not meta.rarity_unlocked(rar):
+				next = "   (%s heroes: reach wave %d)" % [rar, Meta.UNLOCK_WAVE[rar]]
+				break
+		_text(Vector2(0, 556 - 10), "Heroes unlocked %d/%d%s" % [n, Symbols.all_heroes().size(), next], 18, W, Color(0.85, 1, 0.85))
 		return
 	draw_rect(Rect2(0, 0, W, screen_h), Color(0, 0, 0, 0.6))
 	_nine("paper", META_PANEL, 0.6)
@@ -2594,7 +2863,16 @@ func _draw_ui() -> void:
 				var c := SHOP_BTN_RECT.position + Vector2(SHOP_BTN_RECT.size.x - 6, 6)
 				draw_circle(c, 15.0, Color("d0303a"))
 				_text(c + Vector2(-15, 7), str(affordable), 18, 30)
-	if state == "draft" and shop_open:
+	if fate_btn.visible:
+		_button_art(fate_btn, "red", 0.4)
+		_gem(FATE_BTN_RECT.position + Vector2(28, FATE_BTN_RECT.size.y / 2), 16.0, Color("c05cff"))
+		if not fate_spins.is_empty():  # badge: FATE SPINs ready
+			var c := FATE_BTN_RECT.position + Vector2(FATE_BTN_RECT.size.x - 6, 6)
+			draw_circle(c, 15.0, Color("c05cff"))
+			_text(c + Vector2(-15, 7), str(fate_spins.size()), 18, 30)
+	if state == "draft" and shop_open and shop_tab == "fate":
+		_draw_fate()
+	elif state == "draft" and shop_open:
 		draw_rect(Rect2(0, 0, W, screen_h), Color(0, 0, 0, 0.6))
 		_nine("paper", SHOP_PANEL, 0.6)
 		_nine("ribbon_blue", SHOP_RIBBON, 0.7)
@@ -2642,7 +2920,9 @@ func _draw_ui() -> void:
 					draw_rect(r, Color(0.55, 0.75, 1.0, 0.6))
 				else:
 					_draw_symbol(r, next_roll[c])
-	if state == "draft" and promote_unit != null:
+	if state == "draft" and promote_unit != null and panel_mode != "promote":
+		_draw_hero_panel()
+	elif state == "draft" and promote_unit != null:
 		var u: Dictionary = promote_unit
 		draw_rect(Rect2(0, 0, W, screen_h), Color(0, 0, 0, 0.6))
 		_nine("paper", SHOP_PANEL, 0.6)
@@ -2673,3 +2953,156 @@ func _draw_ui() -> void:
 			_nine("btn_blue" if t.button_pressed else "btn_red", Rect2(t.position, t.size), 0.33)
 		_button_art(settings_close, "red")
 
+
+
+# Fate panel: the three trials (C/B/A) with streak progress, rule, waves left and stone reward.
+func _draw_fate() -> void:
+	draw_rect(Rect2(0, 0, W, screen_h), Color(0, 0, 0, 0.6))
+	_nine("paper", SHOP_PANEL, 0.6)
+	_nine("ribbon_purple", SHOP_RIBBON, 0.7)
+	_text(SHOP_RIBBON.position + Vector2(0, 46), "FATE STONES", 30, SHOP_RIBBON.size.x)
+	for i in trials.size():
+		var t: Dictionary = trials[i]
+		var r := Rect2(SHOP_PANEL.position.x + 22 + i * 202, SHOP_PANEL.position.y + 66, 194, 250)
+		var col: Color = Fate.COLOR[t.grade]
+		_nine("paper", r, 0.3)
+		draw_circle(r.position + Vector2(r.size.x - 26, 26), 18.0, col)
+		_text(r.position + Vector2(r.size.x - 44, 34), t.grade, 22, 36)
+		_gem(r.position + Vector2(r.size.x / 2, 58), 22.0, col.lightened(0.3))
+		draw_string(font, r.position + Vector2(0, 104), t.name, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, PAPER_TEXT)
+		var bar := Rect2(r.position + Vector2(24, 116), Vector2(r.size.x - 48, 8))
+		draw_rect(bar, Color(0, 0, 0, 0.2))
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * t.progress / t.need, bar.size.y)), col)
+		draw_string(font, r.position + Vector2(24, 146), "%d/%d" % [t.progress, t.need], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col.darkened(0.2))
+		draw_multiline_string(font, r.position + Vector2(16, 170), "Win %d waves in a row\n%s" % [t.need, t.rule],
+			HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 32, 15, 4, PAPER_TEXT)
+		draw_string(font, r.position + Vector2(0, r.size.y - 14), "FATE SPIN %s   %d waves left" % [t.grade, t.left],
+			HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 14, Color("7a5a30"))
+	var odds := "Each stone = a FATE SPIN: a sure hero line, legendary heroes up to x%.0f as likely" % Symbols.fate_mult("legendary", Fate.POWER.A)
+	if not fate_spins.is_empty():
+		odds = "%d FATE SPIN%s ready - pull the lever!" % [fate_spins.size(), "S" if fate_spins.size() > 1 else ""]
+	draw_string(font, Vector2(SHOP_PANEL.position.x, SHOP_PANEL.position.y + 346), odds, HORIZONTAL_ALIGNMENT_CENTER, SHOP_PANEL.size.x, 17, PAPER_TEXT)
+	_button_art(shop_close, "blue", 0.4)
+
+
+
+# Signature skill (Symbols.SKILLS). Awakened (max level) heroes cast at x1.5, Focus adds more.
+func _cast_skill(u: Dictionary, ot: float) -> void:
+	var sk: Dictionary = Symbols.SKILLS[u.type]
+	var p: Vector2 = u.pos
+	var m: float = sk.mult * (1.5 if u.tier >= MAX_TIER else 1.0) * (1.3 if u.get("promo", 0) >= 3 else 1.0) * (1.0 + Symbols.IMPRINTS.focus.per / 100.0 * _imp(u, "focus"))
+	var dmg := _dmg(u) * m * ot
+	var col: Color = _d(u).color
+	match sk.kind:
+		"nova":
+			for e in enemies:
+				if e.pos.distance_to(p) < sk.r + e.r:
+					e.hp -= dmg
+			effects.append({pos = p, r = sk.r, t = 0.45, t0 = 0.45, boom = true, color = Color(col, 0.35)})
+		"volley", "execute":
+			var by := enemies.duplicate()
+			if sk.kind == "volley":
+				by.sort_custom(func(a, b): return p.distance_squared_to(a.pos) < p.distance_squared_to(b.pos))
+			else:
+				by.sort_custom(func(a, b): return a.hp / a.max_hp < b.hp / b.max_hp)
+			for e in by.slice(0, sk.get("n", 1)):
+				e.hp -= dmg
+				effects.append({pos = e.pos, r = 40.0, t = 0.35, t0 = 0.35, boom = true, color = Color(col, 0.55)})
+		"meteor":
+			var best: Dictionary = enemies[0]
+			var most := -1
+			for e in enemies:
+				var n := enemies.filter(func(o): return o.pos.distance_to(e.pos) < sk.r).size()
+				if n > most:
+					most = n
+					best = e
+			var at: Vector2 = best.pos
+			for e in enemies:
+				if e.pos.distance_to(at) < sk.r + e.r:
+					e.hp -= dmg
+			effects.append({pos = at, r = sk.r, t = 0.55, t0 = 0.55, boom = true, color = Color(1, 0.5, 0.15, 0.4)})
+			shake = maxf(shake, 0.3)
+		"frost":
+			for e in enemies:
+				e.hp -= dmg
+				e.slow_t = 2.5
+				effects.append({pos = e.pos, r = 34.0, t = 0.5, t0 = 0.5, boom = true, color = Color(0.6, 0.85, 1, 0.5)})
+		"shield":
+			for o in squad:
+				if (sk.r == 0.0 and is_same(o, u)) or (sk.r > 0.0 and o.pos.distance_to(p) < sk.r):
+					o.shield = maxf(o.get("shield", 0.0), _max_hp(o) * m)
+			effects.append({pos = p, r = maxf(sk.r, 50.0), t = 0.5, color = Color(0.5, 0.8, 1)})
+		"heal", "rally":
+			for o in squad:
+				o.hp = minf(_max_hp(o), o.hp + _max_hp(o) * m)
+				if sk.kind == "rally":
+					o.buff_t = 4.0
+			effects.append({pos = p, r = 220.0, t = 0.5, color = Color(0.5, 1, 0.6)})
+	popups.append({pos = p + Vector2(0, -56), text = sk.name + "!", color = Color("ffe14d"), t = 1.0})
+	u.act_t = ATTACK_ANIM
+	sfx.play("heal" if sk.kind in ["shield", "heal", "rally"] else "boom")
+
+# Hero panel: info (skill, imprints, XP) or absorb (preview of absorbing absorb_from, or swap).
+func _draw_hero_panel() -> void:
+	var u: Dictionary = promote_unit
+	var d := _d(u)
+	var P := SHOP_PANEL
+	draw_rect(Rect2(0, 0, W, screen_h), Color(0, 0, 0, 0.6))
+	_nine("paper", P, 0.6)
+	_nine("ribbon_purple" if panel_mode == "absorb" else "ribbon_blue", SHOP_RIBBON, 0.7)
+	_text(SHOP_RIBBON.position + Vector2(0, 46), "ABSORB?" if panel_mode == "absorb" else _class_title(u).to_upper(), 30, SHOP_RIBBON.size.x)
+	if panel_mode == "absorb":
+		var g: Dictionary = absorb_from
+		var preview := u.duplicate(true)
+		var lines := _absorb_into(preview, g)
+		draw_string(font, P.position + Vector2(0, 58), "%s Lv%d  into  %s Lv%d" % [_d(g).name, g.tier, d.name, u.tier],
+			HORIZONTAL_ALIGNMENT_CENTER, P.size.x, 20, PAPER_TEXT)
+		for k in 2:
+			var r := _promo_rect(k)
+			_nine("banner", r, 0.4, Color(1.08, 1.08, 1.0) if promo_btns[k].is_hovered() else Color.WHITE)
+			if k == 0:
+				_sprite(Art.UNIT_IDLE[g.type], r.position + Vector2(r.size.x / 2 - 50, 80), 0.9, false, 0, Color(1, 1, 1, 0.6))
+				_sprite(Art.UNIT_IDLE[u.type], r.position + Vector2(r.size.x / 2 + 30, 80), 1.2)
+				draw_string(font, r.position + Vector2(0, 150), "ABSORB", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 26, PAPER_TEXT)
+				draw_multiline_string(font, r.position + Vector2(26, 176), "\n".join(lines), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 52, 15, 5, PAPER_TEXT)
+			else:
+				_sprite(Art.UNIT_IDLE[u.type], r.position + Vector2(r.size.x / 2 - 40, 80), 1.0)
+				_sprite(Art.UNIT_IDLE[g.type], r.position + Vector2(r.size.x / 2 + 40, 80), 1.0, true)
+				draw_string(font, r.position + Vector2(0, 150), "SWAP PLACES", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 26, PAPER_TEXT)
+				draw_multiline_string(font, r.position + Vector2(26, 176), "Keep both heroes, trade their formation spots",
+					HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 52, 15, 3, PAPER_TEXT)
+		return
+	# info
+	_sprite(Art.UNIT_IDLE[u.type], P.position + Vector2(100, 150), 1.6, false, 0, d.get("tint", Color.WHITE))
+	var x := P.position.x + 200
+	var y := P.position.y + 66
+	var w := P.size.x - 230
+	var rar: String = Symbols.DATA[u.type].rarity
+	draw_string(font, Vector2(x, y), "Lv%d %s  (%s)" % [u.tier, d.name, rar], HORIZONTAL_ALIGNMENT_LEFT, w, 22, PAPER_TEXT)
+	y += 26
+	var bar := Rect2(x, y, w - 20, 10)
+	draw_rect(bar, Color(0, 0, 0, 0.2))
+	if u.tier >= MAX_TIER:
+		draw_rect(bar, Color("ffb020"))
+		draw_string(font, Vector2(x, y + 30), "AWAKENED: skill x1.5", HORIZONTAL_ALIGNMENT_LEFT, w, 16, Color("a06010"))
+	else:
+		var need := Symbols.xp_need(u.type, u.tier)
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(u.get("xp", 0.0) / need, 0, 1), bar.size.y)), Color("ffe14d"))
+		draw_string(font, Vector2(x, y + 30), "XP %.1f / %.1f   (absorb heroes)" % [u.get("xp", 0.0), need], HORIZONTAL_ALIGNMENT_LEFT, w, 16, PAPER_TEXT)
+	y += 62
+	var sk: Dictionary = Symbols.SKILLS.get(u.type, {})
+	if not sk.is_empty():
+		draw_string(font, Vector2(x, y), "SKILL  %s  (every %ds)" % [sk.name, int(sk.cd)], HORIZONTAL_ALIGNMENT_LEFT, w, 19, Color("6a3a10"))
+		draw_multiline_string(font, Vector2(x, y + 22), sk.desc, HORIZONTAL_ALIGNMENT_LEFT, w - 10, 16, 2, PAPER_TEXT)
+	y += 70
+	draw_string(font, Vector2(x, y), "IMPRINTS  %d / %d slots" % [u.get("imp", {}).size(), _imprint_slots(u)], HORIZONTAL_ALIGNMENT_LEFT, w, 19, Color("6a3a10"))
+	y += 4
+	for id in u.get("imp", {}):
+		y += 22
+		draw_string(font, Vector2(x, y), Symbols.imprint_text(id, u.imp[id]), HORIZONTAL_ALIGNMENT_LEFT, w - 10, 15, PAPER_TEXT)
+	if u.get("imp", {}).is_empty():
+		y += 22
+		draw_string(font, Vector2(x, y), "None yet: absorb heroes to gain theirs", HORIZONTAL_ALIGNMENT_LEFT, w - 10, 15, PAPER_TEXT)
+	var gives: String = Symbols.HERO_IMPRINT[u.type]
+	draw_string(font, Vector2(P.position.x + 24, P.position.y + 330), "Absorbed by another hero, it gives:  %s" % Symbols.imprint_text(gives, 1),
+		HORIZONTAL_ALIGNMENT_CENTER, P.size.x - 48, 16, Color("7a2aa0"))

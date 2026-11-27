@@ -39,6 +39,20 @@ const DATA := {
 	skylancer = {name = "Skylancer", letter = "Sk", color = Color("6a7aa0"), rarity = "epic", type = "unit",
 		attack = "melee", ability = "leap", hp = 140.0, dmg = 26.0, range = 110.0, cd = 0.9, desc = "Leaps onto the enemy back row"},
 
+	# Categories: the hero symbols on the reels. Three in a line summons a random unlocked hero of
+	# that category (rarer heroes come up less often). Heroes themselves never sit on the reels.
+	warrior = {name = "Warriors", letter = "W", color = Color("d0d0d8"), rarity = "common", type = "category",
+		heroes = ["swordsman", "shieldmaiden", "knight", "skylancer", "champion"], desc = "Three in a line: summon a Warrior (front line)"},
+	ranger = {name = "Rangers", letter = "R", color = Color("6cc04a"), rarity = "common", type = "category",
+		heroes = ["archer", "hunter", "spearman", "assassin"], desc = "Three in a line: summon a Ranger (back line)"},
+	mystic = {name = "Mages", letter = "M", color = Color("4a7cff"), rarity = "rare", type = "category",
+		heroes = ["mage", "frostmage", "bomber"], desc = "Three in a line: summon a Mage (area damage)"},
+	support = {name = "Support", letter = "S", color = Color("7af0c0"), rarity = "rare", type = "category",
+		heroes = ["healer", "bard"], desc = "Three in a line: summon a Support (heals and buffs)"},
+
+	jester = {name = "Jester", letter = "?", color = Color("ff6ad5"), rarity = "rare", type = "wild",
+		desc = "Wild: counts as any hero category in a line. Three Jesters summon a random category"},
+
 	might = {name = "Might", letter = "+D", color = Color("e0b040"), rarity = "common", type = "power",
 		stat = "might", amount = 5.0, desc = "Dmg +5%. Heroes next to it arrive +1 level"},
 	haste = {name = "Haste", letter = "+S", color = Color("4ad0e0"), rarity = "common", type = "power",
@@ -52,11 +66,15 @@ const DATA := {
 	skull = {name = "Skull", letter = "X", color = Color("8a8a8a"), rarity = "common", type = "power",
 		stat = "gold", amount = 60.0, desc = "+60 gold, but enemies +5% HP"},
 	lamb = {name = "Lamb", letter = "L", color = Color("f0f0e0"), rarity = "common", type = "power",
-		stat = "gold", amount = 20.0, hatch = 3, desc = "+20 gold. After landing 3 times it grows into a random rare+ hero"},
+		stat = "gold", amount = 20.0, hatch = 3, desc = "+20 gold. After landing 3 times it grows into Mages or Support"},
 }
-# Class promotions: a hero at Lv3+ picks one of two classes (once). mul = stat multipliers
+# Class promotions: at PROMO_LEVELS[0] a hero picks one of two classes; at the next two
+# milestones it ranks up to Class II and Class III (stronger, more imprint slots). MAX_LEVEL = awakened. mul = stat multipliers
 # (only applied to stats the hero has), set = stats added/replaced. tint colours the sprite.
-const CLASS_TIER := 3
+const PROMO_LEVELS := [6, 14, 24]
+const MAX_LEVEL := 33
+# Hero level from a summon grade (1-5, from Symbols.resolve): power doubles per grade like before.
+const SUMMON_LEVEL := [1, 1, 5, 8, 12, 16]
 const CLASSES := {
 	swordsman = [
 		{id = "guardian", name = "Guardian", tint = Color(0.75, 0.85, 1.2), desc = "Tank: x2 HP, a bit less damage", mul = {hp = 2.0, dmg = 0.8}},
@@ -116,7 +134,7 @@ const CLASSES := {
 	],
 }
 
-const STARTER := ["swordsman", "swordsman", "swordsman", "archer", "archer", "might", "haste"]
+const STARTER := ["warrior", "warrior", "warrior", "ranger", "ranger", "might", "haste"]
 const ROWS := 3
 const COLS := 3
 const CELLS := 9
@@ -129,8 +147,9 @@ const GROW_EVERY := 10   # a symbol type ranks up every this many landings...
 const MAX_RANK := 3      # ...up to this rank. Each rank: heroes +1 level, powers +50%
 
 
-static func tier_mult(tier: int) -> float:
-	return pow(2.0, tier - 1)
+# Stat multiplier at a level = how many Lv1 heroes it is worth (Lv5 ~2, Lv12 ~8, Lv33 ~62).
+static func level_power(lvl: int) -> float:
+	return 1.0 + 0.06 * pow(lvl - 1, 2)
 
 
 static func empty_buffs() -> Dictionary:
@@ -141,6 +160,40 @@ static func info(id: String) -> Dictionary:
 	return DATA[id]
 
 
+# Every hero id (unit symbols).
+static func all_heroes() -> Array:
+	return DATA.keys().filter(func(k): return DATA[k].type == "unit")
+
+
+# Category a hero belongs to ("" if none).
+static func category_of(hero: String) -> String:
+	for k in DATA:
+		if DATA[k].type == "category" and DATA[k].heroes.has(hero):
+			return k
+	return ""
+
+
+# Fate (Fate Stones) multiplies how likely rarer heroes are: x(1 + fate * FATE_BOOST[rarity]).
+const FATE_BOOST := {common = 0.0, rare = 0.3, epic = 0.5, legendary = 0.8}
+
+
+static func fate_mult(rarity: String, fate: int) -> float:
+	return 1.0 + fate * FATE_BOOST[rarity]
+
+
+# Random hero of category `cat` from `unlocked` (all heroes when empty), weighted by rarity and fate.
+static func pick_hero(cat: String, unlocked := [], fate := 0) -> String:
+	var ids: Array = DATA[cat].heroes.filter(func(h): return unlocked.is_empty() or unlocked.has(h))
+	if ids.is_empty():
+		ids = [DATA[cat].heroes[0]]
+	var weights := PackedFloat32Array()
+	for h in ids:
+		weights.append(RARITY_WEIGHT[DATA[h].rarity] * fate_mult(DATA[h].rarity, fate))
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return str(ids[rng.rand_weighted(weights)])
+
+
 # ctx.items: "leaf" = heroes land more often, "nugget" = rare+ land more often.
 static func roll(pool: Array, ctx := {}) -> Array:
 	var items: Array = ctx.get("items", [])
@@ -149,7 +202,7 @@ static func roll(pool: Array, ctx := {}) -> Array:
 	for id in b:
 		var rar: String = info(id).rarity
 		var w: float = RARITY_WEIGHT[rar]
-		if DATA[id].type == "unit" and items.has("leaf"):
+		if DATA[id].type == "category" and items.has("leaf"):
 			w *= 1.25
 		if rar in ["rare", "epic", "legendary"] and items.has("nugget"):
 			w *= 1.6
@@ -226,12 +279,12 @@ static func resolve(grid: Array, ctx := {}) -> Dictionary:
 	var on_line := {}
 	for k in LINES.size():
 		var line: Array = LINES[k]
-		var id := str(grid[line[0]])
-		if id == "blank" or grid[line[1]] != id or grid[line[2]] != id:
+		var id := _line_id(line.map(func(c): return str(grid[c])))
+		if id == "":
 			continue
 		var d: Dictionary = info(id)
 		var ev := {i = line[1], cells = line, color = Color("ffe14d"), buffs = empty_buffs()}
-		if d.type == "unit":
+		if d.type == "category":
 			var might := -1
 			for c in line:
 				if might < 0:
@@ -272,7 +325,7 @@ static func resolve(grid: Array, ctx := {}) -> Dictionary:
 		miss.buffs.gold += 60
 	if cores.has("chaos"):  # heroes that land off any line still pay
 		for c in CELLS:
-			if not on_line.has(c) and DATA.get(str(grid[c]), {}).get("type", "") == "unit":
+			if not on_line.has(c) and DATA.get(str(grid[c]), {}).get("type", "") == "category":
 				miss.buffs.gold += 15
 	if miss.buffs.gold > 0:
 		miss.text = "+%d gold" % miss.buffs.gold
@@ -290,6 +343,87 @@ static func _buff_text(b: Dictionary) -> String:
 	if b.gold: parts.append("+%d gold" % b.gold)
 	if b.spins: parts.append("+%d spin" % b.spins)
 	return "\n".join(parts)
+
+
+# What a line of 3 symbol ids pays as ("" = no line). Jesters are wild for hero categories;
+# three Jesters become a random category.
+static func _line_id(ids: Array) -> String:
+	var real := ids.filter(func(x): return x != "jester")
+	if real.is_empty():
+		return ["warrior", "ranger", "mystic", "support"].pick_random()
+	if real[0] == "blank" or not real.all(func(x): return x == real[0]):
+		return ""
+	return real[0] if real.size() == 3 or DATA[real[0]].type == "category" else ""
+
+
+# Faction synergies: heroes of one category in the squad. 2 = level 1, 4 = level 2.
+const SYNERGY := {
+	warrior = {desc = "Warriors +%d%% HP", amount = [0, 20, 45]},
+	ranger = {desc = "Rangers +%d%% damage", amount = [0, 15, 35]},
+	mystic = {desc = "Mages +%d%% damage", amount = [0, 20, 45]},
+	support = {desc = "Whole squad +%d%% HP", amount = [0, 10, 25]},
+}
+
+
+static func synergy_level(count: int) -> int:
+	return 2 if count >= 4 else 1 if count >= 2 else 0
+
+
+# Signature skills: every hero casts its own on a cooldown in battle (run.gd _cast_skill).
+# kind: nova = hit everyone within r of the hero | volley = hit the n nearest enemies |
+# execute = hit the weakest enemy | meteor = blast of radius r on the most crowded enemy |
+# frost = hit all enemies and slow them | shield = shield allies within r (0 = self) for mult x max HP |
+# heal = heal all allies mult x max HP | rally = allies attack faster for 4s and heal mult.
+# mult = x the hero's damage (or x max HP for shield/heal). Awakened heroes (max level): x1.5.
+const SKILLS := {
+	swordsman = {name = "Whirlwind", kind = "nova", cd = 6.0, mult = 2.0, r = 130.0, desc = "Spins: 200% damage to all nearby"},
+	shieldmaiden = {name = "Shield Wall", kind = "shield", cd = 8.0, mult = 0.25, r = 220.0, desc = "Nearby allies get a 25% HP shield"},
+	knight = {name = "Bulwark", kind = "shield", cd = 7.0, mult = 0.5, r = 0.0, desc = "Shields himself for 50% HP"},
+	skylancer = {name = "Dragon Dive", kind = "execute", cd = 7.0, mult = 3.0, desc = "300% damage to the weakest enemy"},
+	champion = {name = "Golden Storm", kind = "nova", cd = 6.0, mult = 2.5, r = 180.0, desc = "250% damage to all around him"},
+	archer = {name = "Volley", kind = "volley", cd = 6.0, mult = 1.5, n = 4, desc = "Hits 4 enemies for 150%"},
+	hunter = {name = "Arrow Rain", kind = "volley", cd = 7.0, mult = 1.0, n = 7, desc = "Hits 7 enemies for 100%"},
+	spearman = {name = "Skewer", kind = "volley", cd = 6.0, mult = 2.5, n = 3, desc = "Hits 3 enemies for 250%"},
+	assassin = {name = "Execute", kind = "execute", cd = 5.0, mult = 4.0, desc = "400% damage to the weakest enemy"},
+	mage = {name = "Meteor", kind = "meteor", cd = 8.0, mult = 3.0, r = 150.0, desc = "300% blast on the biggest crowd"},
+	frostmage = {name = "Blizzard", kind = "frost", cd = 9.0, mult = 0.8, desc = "80% to all enemies, slows them"},
+	bomber = {name = "Big Bomb", kind = "meteor", cd = 9.0, mult = 4.0, r = 190.0, desc = "400% huge blast"},
+	healer = {name = "Sanctuary", kind = "heal", cd = 8.0, mult = 0.3, desc = "Heals the whole squad 30%"},
+	bard = {name = "Anthem", kind = "rally", cd = 9.0, mult = 0.1, desc = "Squad attacks faster for 4s, heals 10%"},
+}
+
+# Imprints: traits passed on by absorbing a hero (its `HERO_IMPRINT`), levels 1-3.
+const IMPRINTS := {
+	frenzy = {name = "Frenzy", desc = "+%d%% attack speed", per = 12},
+	buildup = {name = "Build Up", desc = "+%d%% damage every 2s of battle (max 10)", per = 3},
+	explode = {name = "Last Stand", desc = "On death: explode for %d%% max HP, stun 1s", per = 40},
+	guard = {name = "Guard", desc = "Takes %d%% less damage", per = 10},
+	regen = {name = "Regen", desc = "Heals %d%% max HP per second", per = 1},
+	focus = {name = "Focus", desc = "Skill +%d%% damage, recharges faster", per = 15},
+}
+const HERO_IMPRINT := {
+	swordsman = "explode", shieldmaiden = "guard", knight = "guard", skylancer = "frenzy", champion = "buildup",
+	archer = "focus", hunter = "frenzy", spearman = "buildup", assassin = "focus",
+	mage = "buildup", frostmage = "focus", bomber = "explode", healer = "regen", bard = "regen",
+}
+const IMPRINT_MAX := 3
+const IMPRINT_SLOTS := 2       # +1 once promoted
+
+# Levelling by absorbing: XP is counted in Lv1 heroes. A hero needs xp_need() for its next level
+# (rarer heroes need more); an absorbed hero is worth its level_power (rarer ones are worth more).
+const RARITY_NEED := {common = 1.0, rare = 1.5, epic = 2.0, legendary = 3.0}
+
+
+static func xp_need(type: String, lvl: int) -> float:
+	return (level_power(lvl + 1) - level_power(lvl)) * RARITY_NEED[DATA[type].rarity]
+
+
+static func feed_value(type: String, lvl: int, xp := 0.0) -> float:
+	return level_power(lvl) * RARITY_NEED[DATA[type].rarity] + xp
+
+
+static func imprint_text(id: String, lvl: int) -> String:
+	return "%s %d: %s" % [IMPRINTS[id].name, lvl, IMPRINTS[id].desc % (IMPRINTS[id].per * lvl)]
 
 
 # Stats of `type` promoted to class index `k` (CLASSES[type][k]).
@@ -333,7 +467,7 @@ static func draft_offers(n: int, rare_plus := false, luck := 0.0) -> Array:
 	while out.size() < n:
 		var r := randf() * (0.4 if rare_plus else 1.0) * (1.0 - luck)
 		var rar := "legendary" if r < 0.03 else "epic" if r < 0.13 else "rare" if r < 0.4 else "common"
-		var ids: Array = DATA.keys().filter(func(k): return k != "blank" and DATA[k].rarity == rar and not out.has(str(k)))
+		var ids: Array = DATA.keys().filter(func(k): return DATA[k].type in ["category", "power"] and DATA[k].rarity == rar and not out.has(str(k)))
 		if not ids.is_empty():
 			out.append(str(ids.pick_random()))
 	return out

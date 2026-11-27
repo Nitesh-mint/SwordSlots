@@ -18,11 +18,24 @@ const HARD_HP := 1.4        # hard mode: enemy HP x, damage x, crystals x
 const HARD_DMG := 1.2
 const HARD_CRYSTALS := 1.5
 
+# Stages: beat one to unlock the next. hp/dmg scale enemies, crystals scale rewards,
+# theme shifts which act backgrounds are used, boss_hp toughens every boss.
+const STAGES := [
+	{name = "Greenvale", hp = 1.0, dmg = 1.0, crystals = 1.0, theme = 0, boss_hp = 1.0},
+	{name = "Crimson Hell", hp = 4.0, dmg = 2.2, crystals = 2.0, theme = 1, boss_hp = 1.3},
+	{name = "Doom Spire", hp = 9.0, dmg = 3.5, crystals = 3.0, theme = 2, boss_hp = 1.6},
+]
+
+# Hero unlocks (new content between runs): commons from the start, rarer heroes by best wave reached.
+const UNLOCK_WAVE := {common = 0, rare = 4, epic = 9, legendary = 15}
+
 var crystals := 0
 var levels := {}             # upgrade id -> level
 var best := 0                # furthest wave reached
 var wins := 0
 var hard := false            # hard mode selected (unlocked after the first win)
+var stage := 0               # selected stage (index into STAGES)
+var cleared := 0             # stages beaten: stage k is playable while k <= cleared
 var enabled := true          # false in headless sims so they never touch the save
 
 
@@ -56,7 +69,12 @@ func buy(id: String) -> bool:
 # Crystals for a finished run: 3 per wave cleared, 10 per boss, 25 for winning.
 func reward(cleared: int, won: bool) -> int:
 	var n := cleared * 3 + int(cleared / 5.0) * 10 + (25 if won else 0)
-	return int(n * (1.0 + 0.25 * lvl("crystal")) * (HARD_CRYSTALS if hard else 1.0))
+	return int(n * (1.0 + 0.25 * lvl("crystal")) * (HARD_CRYSTALS if hard else 1.0) * STAGES[stage].crystals)
+
+
+# Rarity a hero needs unlocked, given `best` wave reached.
+func rarity_unlocked(rarity: String) -> bool:
+	return best >= UNLOCK_WAVE[rarity]
 
 
 func load_save() -> void:
@@ -70,6 +88,8 @@ func load_save() -> void:
 	best = cfg.get_value("meta", "best", 0)
 	wins = cfg.get_value("meta", "wins", 0)
 	hard = cfg.get_value("meta", "hard", false) and wins > 0
+	cleared = cfg.get_value("meta", "cleared", mini(wins, 1))
+	stage = mini(cfg.get_value("meta", "stage", 0), mini(cleared, STAGES.size() - 1))
 
 
 func save() -> void:
@@ -81,4 +101,6 @@ func save() -> void:
 	cfg.set_value("meta", "best", best)
 	cfg.set_value("meta", "wins", wins)
 	cfg.set_value("meta", "hard", hard)
+	cfg.set_value("meta", "stage", stage)
+	cfg.set_value("meta", "cleared", cleared)
 	cfg.save(SAVE_PATH)
